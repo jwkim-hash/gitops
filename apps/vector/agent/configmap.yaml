@@ -56,3 +56,11 @@ data:
           - parse_edge_logs
         address: vector-aggregator.vector.svc.cluster.local:9000
         compression: true
+
+      edge_console:
+        type: console
+        inputs:
+          - parse_edge_logs
+        encoding:
+          codec: json
+        target: stdout
