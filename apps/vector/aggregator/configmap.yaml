@@ -31,6 +31,136 @@ data:
             . = merge(., parsed) ?? .
           }
 
+      # Edge CDN advanced analytics
+      analyze_edge_logs:
+        type: remap
+        inputs:
+          - parse_json
+        source: |
+          # Only process Edge CDN logs
+          if !exists(.log_source) || .log_source != "edge_cdn" {
+            abort
+          }
+
+          # 1. Performance tier classification
+          timetaken_val = to_float(.timetaken_f) ?? to_float(.timetaken) ?? 0.0
+          .performance_tier = if timetaken_val < 0.5 {
+            "excellent"
+          } else if timetaken_val < 1.0 {
+            "good"
+          } else if timetaken_val < 2.0 {
+            "acceptable"
+          } else {
+            "slow"
+          }
+
+          # 2. Bandwidth calculation (bps to Mbps)
+          bps_val = to_int(.bps) ?? 0
+          .bandwidth_mbps = to_float(bps_val) / 1_000_000.0
+
+          # 3. Cache efficiency
+          .cache_hit = .cache_status == "HIT"
+          .cache_miss = .cache_status == "MISS"
+          .cache_expired = .cache_status == "EXPIRED"
+
+          # 4. Geographic routing
+          country = to_string(.geoip.country_code2) ?? "UNKNOWN"
+          .is_domestic = country == "KR"
+          .is_international = country != "KR"
+          .geo_region = if country == "KR" {
+            "domestic"
+          } else if contains_all(["JP", "CN", "SG"], [country]) {
+            "asia"
+          } else if contains_all(["US", "CA"], [country]) {
+            "americas"
+          } else {
+            "other"
+          }
+
+          # 5. Device classification
+          device = to_string(.useragent.device) ?? "unknown"
+          .device_type = if device == "smartphone" || device == "tablet" {
+            "mobile"
+          } else if device == "pc" {
+            "desktop"
+          } else {
+            "unknown"
+          }
+
+          # 6. Error detection and classification
+          response_code = to_int(.response) ?? 0
+          .is_error = response_code >= 400
+          .is_success = response_code >= 200 && response_code < 300
+          .is_redirect = response_code >= 300 && response_code < 400
+
+          .error_type = if response_code >= 500 {
+            "server_error"
+          } else if response_code >= 400 {
+            "client_error"
+          } else {
+            "success"
+          }
+
+          .error_severity = if response_code >= 500 {
+            "critical"
+          } else if response_code >= 400 {
+            "warning"
+          } else {
+            "normal"
+          }
+
+          # 7. Slow response flag
+          .is_slow = timetaken_val > 3.0
+
+          # 8. Video quality tier
+          quality = to_string(.video_quality) ?? "unknown"
+          .quality_tier = if quality == "1080p" || quality == "720p" {
+            "hd"
+          } else if quality == "480p" || quality == "360p" {
+            "sd"
+          } else {
+            "unknown"
+          }
+
+          # 9. Content type classification
+          ext = to_string(.extension) ?? ""
+          .content_type = if ext == ".mp4" {
+            "video"
+          } else if ext == ".ts" {
+            "segment"
+          } else if ext == ".m3u8" {
+            "playlist"
+          } else if ext == ".mpd" {
+            "manifest"
+          } else {
+            "other"
+          }
+
+          # 10. Traffic size classification
+          bytes_val = to_int(.bytes) ?? 0
+          .traffic_size = if bytes_val > 5_000_000 {
+            "large"
+          } else if bytes_val > 1_000_000 {
+            "medium"
+          } else {
+            "small"
+          }
+
+          # 11. Alert flags
+          .alert_slow_response = timetaken_val > 5.0
+          .alert_server_error = response_code >= 500
+          .alert_cache_miss = .cache_status == "MISS" && timetaken_val > 2.0
+
+          # 12. Business metrics
+          .is_cacheable = .cache_status != "BYPASS"
+          .cdn_efficiency = .cache_hit && timetaken_val < 1.0
+
+          # 13. Normalize timestamp for ClickHouse
+          if exists(.@timestamp) {
+            .timestamp = .@timestamp
+            del(.@timestamp)
+          }
+
     sinks:
       clickhouse:
         type: clickhouse
@@ -47,9 +177,35 @@ data:
         encoding:
           timestamp_format: unix
 
+      clickhouse_edge:
+        type: clickhouse
+        inputs:
+          - analyze_edge_logs
+        endpoint: http://clickhouse.clickhouse.svc.cluster.local:8123
+        database: logs
+        table: edge_cdn_logs
+        auth:
+          strategy: basic
+          user: admin
+          password: admin123
+        skip_unknown_fields: true
+        encoding:
+          timestamp_format: unix
+        batch:
+          max_events: 1000
+          timeout_secs: 10
+
       console:
         type: console
         inputs:
           - parse_json
         encoding:
           codec: json
+
+      edge_console:
+        type: console
+        inputs:
+          - analyze_edge_logs
+        encoding:
+          codec: json
+        target: stdout
