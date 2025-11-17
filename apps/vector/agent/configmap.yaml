@@ -12,6 +12,14 @@ data:
         type: kubernetes_logs
         extra_label_selector: "vector.dev/exclude!=true"
 
+      edge_logs:
+        type: file
+        include:
+          - /tmp/access.log
+        read_from: beginning
+        fingerprint:
+          strategy: device_and_inode
+
     transforms:
       parse_logs:
         type: remap
@@ -21,10 +29,30 @@ data:
           .timestamp = now()
           .node = get_env_var!("NODE_NAME")
 
+      parse_edge_logs:
+        type: remap
+        inputs:
+          - edge_logs
+        source: |
+          # Parse NDJSON (newline-delimited JSON)
+          . = parse_json!(.message)
+
+          # Add collection metadata
+          .collected_at = now()
+          .collector_node = get_env_var!("NODE_NAME")
+          .log_source = "edge_cdn"
+
     sinks:
       aggregator:
         type: vector
         inputs:
           - parse_logs
+        address: vector-aggregator.vector.svc.cluster.local:9000
+        compression: true
+
+      edge_aggregator:
+        type: vector
+        inputs:
+          - parse_edge_logs
         address: vector-aggregator.vector.svc.cluster.local:9000
         compression: true
