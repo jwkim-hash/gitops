@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: vector-aggregator
+  namespace: vector
+spec:
+  selector:
+    app: vector-aggregator
+  ports:
+  - name: vector
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  type: ClusterIP

@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-init
+  namespace: clickhouse
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: clickhouse-client
+        image: clickhouse/clickhouse-server:23.8-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          sleep 30
+          clickhouse-client --host clickhouse --port 9000 --user admin --password admin123 --query "
+          CREATE DATABASE IF NOT EXISTS logs;
+
+          CREATE TABLE IF NOT EXISTS logs.vector_logs (
+            timestamp DateTime64(3),
+            message String,
+            source_type String,
+            stream String,
+            file String,
+            kubernetes_pod_name String,
+            kubernetes_namespace String,
+            kubernetes_container_name String,
+            kubernetes_node_name String,
+            node String,
+            processed_at DateTime64(3),
+            environment String
+          ) ENGINE = MergeTree()
+          ORDER BY (timestamp, kubernetes_namespace, kubernetes_pod_name)
+          PARTITION BY toYYYYMMDD(timestamp)
+          TTL timestamp + INTERVAL 7 DAY;
+          "

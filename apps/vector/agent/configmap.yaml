@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-agent-config
+  namespace: vector
+data:
+  vector.yaml: |
+    data_dir: /vector-data-dir
+
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+        extra_label_selector: "vector.dev/exclude!=true"
+
+    transforms:
+      parse_logs:
+        type: remap
+        inputs:
+          - kubernetes_logs
+        source: |
+          .timestamp = now()
+          .node = get_env_var!("NODE_NAME")
+
+    sinks:
+      aggregator:
+        type: vector
+        inputs:
+          - parse_logs
+        address: vector-aggregator.vector.svc.cluster.local:9000
+        compression: true

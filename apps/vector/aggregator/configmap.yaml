@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-aggregator-config
+  namespace: vector
+data:
+  vector.yaml: |
+    data_dir: /vector-data-dir
+
+    sources:
+      vector_source:
+        type: vector
+        address: 0.0.0.0:9000
+
+    transforms:
+      enrich_logs:
+        type: remap
+        inputs:
+          - vector_source
+        source: |
+          .processed_at = now()
+          .environment = "local-k8s"
+
+      parse_json:
+        type: remap
+        inputs:
+          - enrich_logs
+        source: |
+          if is_string(.message) {
+            parsed = parse_json(.message) ?? {}
+            . = merge(., parsed) ?? .
+          }
+
+    sinks:
+      clickhouse:
+        type: clickhouse
+        inputs:
+          - parse_json
+        endpoint: http://clickhouse.clickhouse.svc.cluster.local:8123
+        database: logs
+        table: vector_logs
+        auth:
+          strategy: basic
+          user: admin
+          password: admin123
+        skip_unknown_fields: true
+        encoding:
+          timestamp_format: unix
+
+      console:
+        type: console
+        inputs:
+          - parse_json
+        encoding:
+          codec: json
