@@ -4,7 +4,7 @@ metadata:
   name: vector-aggregator
   namespace: vector
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: vector-aggregator
